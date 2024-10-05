@@ -16,6 +16,7 @@ import {
   Canister,
 } from "azle";
 import { v4 as uuidv4 } from "uuid";
+
 // Roles Enumeration
 const UserRole = Variant({
   User: Null,
@@ -167,19 +168,18 @@ const maintenanceStorage = StableBTreeMap(4, text, Maintenance);
 const emergencyAssistanceStorage = StableBTreeMap(5, text, EmergencyAssistance);
 const routeStorage = StableBTreeMap(6, text, Route);
 
+// Helper Functions
+const validateId = (id: string) => id && id.trim().length > 0;
+
 // Canister Declaration
 export default Canister({
   // Create Driver
   createDriver: update([DriverPayload], Result(Driver, Message), (payload) => {
-    // Validate payload to ensure required fields are present
     if (!payload.name || !payload.license_number || !payload.contact_info) {
       return Err({ InvalidPayload: "Missing required fields" });
     }
 
-    // Generate a unique ID for the driver
     const driverId = uuidv4();
-
-    // Create the driver object
     const driver = {
       id: driverId,
       owner: ic.caller(),
@@ -188,10 +188,7 @@ export default Canister({
       created_at: ic.time(),
     };
 
-    // Insert the driver into the storage
     driverStorage.insert(driverId, driver);
-
-    // Return a successful result
     return Ok(driver);
   }),
 
@@ -206,6 +203,7 @@ export default Canister({
 
   // Get Driver by ID
   getDriverById: query([text], Result(Driver, Message), (driverId) => {
+    if (!validateId(driverId)) return Err({ InvalidPayload: "Invalid driver ID" });
     const driverOpt = driverStorage.get(driverId);
     if ("None" in driverOpt) {
       return Err({ NotFound: "Driver not found" });
@@ -215,44 +213,55 @@ export default Canister({
 
   // Fetch Driver by Principal
   getDriverByPrincipal: query([], Result(Driver, Message), () => {
-    const driverOpt = driverStorage.values().filter((driver) => {
-      return driver.owner === ic.caller();
-    });
-
+    const driverOpt = driverStorage.values().filter((driver) => driver.owner === ic.caller());
     if (driverOpt.length === 0) {
       return Err({ NotFound: "Driver not found" });
     }
+    return Ok(driverOpt[0]);
+  }),
 
+  // Delete Driver
+  deleteDriver: update([text], Result(Message, Message), (driverId) => {
+    if (!validateId(driverId)) return Err({ InvalidPayload: "Invalid driver ID" });
+
+    const driverOpt = driverStorage.get(driverId);
+    if ("None" in driverOpt) {
+      return Err({ NotFound: "Driver not found" });
+    }
+
+    driverStorage.remove(driverId);
+    return Ok({ Success: "Driver deleted successfully" });
+  }),
+
+  // Get Driver by License Number
+  getDriverByLicenseNumber: query([text], Result(Driver, Message), (licenseNumber) => {
+    const driverOpt = driverStorage.values().filter((driver) => driver.license_number === licenseNumber);
+    if (driverOpt.length === 0) {
+      return Err({ NotFound: "Driver not found with this license number" });
+    }
     return Ok(driverOpt[0]);
   }),
 
   // Create Vehicle
-  createVehicle: update(
-    [VehiclePayload],
-    Result(Vehicle, Message),
-    (payload) => {
-      if (
-        !payload.registration_number ||
-        !payload.model ||
-        !payload.capacity ||
-        !payload.location
-      ) {
-        return Err({ InvalidPayload: "Missing required fields" });
-      }
-      const vehicleId = uuidv4();
-      const vehicle = {
-        id: vehicleId,
-        ...payload,
-        status: { Available: null },
-        created_at: ic.time(),
-      };
-      vehicleStorage.insert(vehicleId, vehicle);
-      return Ok(vehicle);
+  createVehicle: update([VehiclePayload], Result(Vehicle, Message), (payload) => {
+    if (!payload.registration_number || !payload.model || payload.capacity <= 0 || !payload.location) {
+      return Err({ InvalidPayload: "Missing or invalid vehicle data" });
     }
-  ),
+
+    const vehicleId = uuidv4();
+    const vehicle = {
+      id: vehicleId,
+      ...payload,
+      status: { Available: null },
+      created_at: ic.time(),
+    };
+    vehicleStorage.insert(vehicleId, vehicle);
+    return Ok(vehicle);
+  }),
 
   // Get Vehicle by ID
   getVehicleById: query([text], Result(Vehicle, Message), (vehicleId) => {
+    if (!validateId(vehicleId)) return Err({ InvalidPayload: "Invalid vehicle ID" });
     const vehicleOpt = vehicleStorage.get(vehicleId);
     if ("None" in vehicleOpt) {
       return Err({ NotFound: "Vehicle not found" });
@@ -261,267 +270,151 @@ export default Canister({
   }),
 
   // Get Vehicle by Registration Number
-  getVehicleByRegistrationNumber: query(
-    [text],
-    Result(Vehicle, Message),
-    (registrationNumber) => {
-      const vehicleOpt = vehicleStorage.values().filter((vehicle) => {
-        return vehicle.registration_number === registrationNumber;
-      });
-
-      if (vehicleOpt.length === 0) {
-        return Err({ NotFound: "Vehicle not found" });
-      }
-
-      return Ok(vehicleOpt[0]);
-    }
-  ),
-
-  // Get Vehicle by model
-  getVehicleByModel: query([text], Result(Vec(Vehicle), Message), (model) => {
-    const vehicleOpt = vehicleStorage.values().filter((vehicle) => {
-      return vehicle.model === model;
-    });
-
+  getVehicleByRegistrationNumber: query([text], Result(Vehicle, Message), (registrationNumber) => {
+    const vehicleOpt = vehicleStorage.values().filter((vehicle) => vehicle.registration_number === registrationNumber);
     if (vehicleOpt.length === 0) {
       return Err({ NotFound: "Vehicle not found" });
     }
-
-    return Ok(vehicleOpt);
+    return Ok(vehicleOpt[0]);
   }),
 
-  // Get Vehicles
-  getVehicles: query([], Result(Vec(Vehicle), Message), () => {
-    const vehicles = vehicleStorage.values();
-    if (vehicles.length === 0) {
-      return Err({ NotFound: "No vehicles found" });
+  // Delete Vehicle
+  deleteVehicle: update([text], Result(Message, Message), (vehicleId) => {
+    if (!validateId(vehicleId)) return Err({ InvalidPayload: "Invalid vehicle ID" });
+
+    const vehicleOpt = vehicleStorage.get(vehicleId);
+    if ("None" in vehicleOpt) {
+      return Err({ NotFound: "Vehicle not found" });
     }
-    return Ok(vehicles);
+
+    vehicleStorage.remove(vehicleId);
+    return Ok({ Success: "Vehicle deleted successfully" });
+  }),
+
+  // Update Vehicle Status
+  updateVehicleStatus: update([text, VehicleStatus], Result(Message, Message), (vehicleId, status) => {
+    if (!validateId(vehicleId)) return Err({ InvalidPayload: "Invalid vehicle ID" });
+
+    const vehicleOpt = vehicleStorage.get(vehicleId);
+    if ("None" in vehicleOpt) {
+      return Err({ NotFound: "Vehicle not found" });
+    }
+
+    let vehicle = vehicleOpt.Some;
+    vehicle.status = status;
+    vehicleStorage.insert(vehicleId, vehicle);
+    return Ok({ Success: "Vehicle status updated successfully" });
   }),
 
   // Create Booking
-  createBooking: update(
-    [BookingPayload],
-    Result(Booking, Message),
-    (payload) => {
-      if (
-        !payload.from_location ||
-        !payload.to_location ||
-        payload.start_time <= ic.time()
-      ) {
-        return Err({ InvalidPayload: "Invalid booking data" });
-      }
-
-      // Check if the vehicle is available
-      const vehicleOpt = vehicleStorage.values().filter((vehicle) => {
-        return vehicle.id === payload.vehicle_id;
-      });
-
-      if (vehicleOpt.length === 0) {
-        return Err({ NotFound: "Vehicle not found" });
-      }
-
-      if (vehicleOpt[0].status !== "Available") {
-        return Err({ Error: "Vehicle is not available" });
-      }
-
-      // Check if the driver is available
-      const driverOpt = driverStorage.values().filter((driver) => {
-        return driver.id === payload.driver_id;
-      });
-
-      if (driverOpt.length === 0) {
-        return Err({ NotFound: "Driver not found" });
-      }
-
-      const bookingId = uuidv4();
-      const booking = {
-        id: bookingId,
-        ...payload,
-        status: "pending",
-        created_at: ic.time(),
-      };
-      bookingStorage.insert(bookingId, booking);
-      return Ok(booking);
+  createBooking: update([BookingPayload], Result(Booking, Message), (payload) => {
+    if (!payload.from_location || !payload.to_location || payload.start_time <= ic.time()) {
+      return Err({ InvalidPayload: "Invalid booking data" });
     }
-  ),
+
+    const vehicleOpt = vehicleStorage.values().filter((vehicle) => vehicle.id === payload.vehicle_id);
+    if (vehicleOpt.length === 0) return Err({ NotFound: "Vehicle not found" });
+    if (vehicleOpt[0].status.Available === undefined) return Err({ Error: "Vehicle is not available" });
+
+    const driverOpt = driverStorage.values().filter((driver) => driver.id === payload.driver_id);
+    if (driverOpt.length === 0) return Err({ NotFound: "Driver not found" });
+
+    const bookingId = uuidv4();
+    const booking = {
+      id: bookingId,
+      ...payload,
+      status: "pending",
+      created_at: ic.time(),
+    };
+    bookingStorage.insert(bookingId, booking);
+    return Ok(booking);
+  }),
 
   // Get Bookings
   getBookings: query([], Result(Vec(Booking), Message), () => {
     const bookings = bookingStorage.values();
-    if (bookings.length === 0) {
-      return Err({ NotFound: "No bookings found" });
-    }
+    if (bookings.length === 0) return Err({ NotFound: "No bookings found" });
     return Ok(bookings);
   }),
 
-  // Get Booking by ID
-  getBookingById: query([text], Result(Booking, Message), (bookingId) => {
-    const bookingOpt = bookingStorage.get(bookingId);
-    if ("None" in bookingOpt) {
-      return Err({ NotFound: "Booking not found" });
-    }
-    return Ok(bookingOpt.Some);
+  // Get Booking by Vehicle ID
+  getBookingByVehicleId: query([text], Result(Vec(Booking), Message), (vehicleId) => {
+    const bookings = bookingStorage.values().filter((booking) => booking.vehicle_id === vehicleId);
+    if (bookings.length === 0) return Err({ NotFound: "No bookings found for this vehicle" });
+    return Ok(bookings);
   }),
 
-  // Get Booking by Vehicle ID
-  getBookingByVehicleId: query(
-    [text],
-    Result(Vec(Booking), Message),
-    (vehicleId) => {
-      const bookings = bookingStorage.values().filter((booking) => {
-        return booking.vehicle_id === vehicleId;
-      });
-
-      if (bookings.length === 0) {
-        return Err({ NotFound: "No bookings found" });
-      }
-
-      return Ok(bookings);
-    }
-  ),
-
-  // Get Booking by Driver ID
-  getBookingByDriverId: query(
-    [text],
-    Result(Vec(Booking), Message),
-    (driverId) => {
-      const bookings = bookingStorage.values().filter((booking) => {
-        return booking.driver_id === driverId;
-      });
-
-      if (bookings.length === 0) {
-        return Err({ NotFound: "No bookings found" });
-      }
-
-      return Ok(bookings);
-    }
-  ),
-
   // Record Fuel Consumption
-  recordFuelConsumption: update(
-    [FuelConsumptionPayload],
-    Result(FuelConsumption, Message),
-    (payload) => {
-      if (parseFloat(payload.amount) <= 0) {
-        return Err({ InvalidPayload: "Amount must be greater than zero" });
-      }
-
-      // Check if the vehicle exists
-      const vehicleOpt = vehicleStorage.values().filter((vehicle) => {
-        return vehicle.id === payload.vehicle_id;
-      });
-
-      if (vehicleOpt.length === 0) {
-        return Err({ NotFound: "Vehicle not found" });
-      }
-
-      const consumptionId = uuidv4();
-      const fuelConsumption = {
-        id: consumptionId,
-        ...payload,
-      };
-      fuelConsumptionStorage.insert(consumptionId, fuelConsumption);
-      return Ok(fuelConsumption);
+  recordFuelConsumption: update([FuelConsumptionPayload], Result(FuelConsumption, Message), (payload) => {
+    if (parseFloat(payload.amount) <= 0) {
+      return Err({ InvalidPayload: "Amount must be greater than zero" });
     }
-  ),
 
-  // Get Fuel Consumption Records
-  getFuelConsumptions: query([], Result(Vec(FuelConsumption), Message), () => {
-    const records = fuelConsumptionStorage.values();
-    if (records.length === 0) {
-      return Err({ NotFound: "No fuel consumption records found" });
-    }
-    return Ok(records);
+    const vehicleOpt = vehicleStorage.get(payload.vehicle_id);
+    if ("None" in vehicleOpt) return Err({ NotFound: "Vehicle not found" });
+
+    const consumptionId = uuidv4();
+    const fuelConsumption = {
+      id: consumptionId,
+      ...payload,
+    };
+    fuelConsumptionStorage.insert(consumptionId, fuelConsumption);
+    return Ok(fuelConsumption);
   }),
 
   // Schedule Maintenance
-  scheduleMaintenance: update(
-    [MaintenancePayload],
-    Result(Maintenance, Message),
-    (payload) => {
-      if (!payload.description || payload.scheduled_date <= ic.time()) {
-        return Err({ InvalidPayload: "Invalid maintenance data" });
-      }
-
-      // Check if the vehicle exists
-      const vehicleOpt = vehicleStorage.values().filter((vehicle) => {
-        return vehicle.id === payload.vehicle_id;
-      });
-
-      if (vehicleOpt.length === 0) {
-        return Err({ NotFound: "Vehicle not found" });
-      }
-
-      const maintenanceId = uuidv4();
-      const maintenance = {
-        id: maintenanceId,
-        ...payload,
-        status: "pending",
-        created_at: ic.time(),
-      };
-      maintenanceStorage.insert(maintenanceId, maintenance);
-      return Ok(maintenance);
+  scheduleMaintenance: update([MaintenancePayload], Result(Maintenance, Message), (payload) => {
+    if (!payload.description || payload.scheduled_date <= ic.time()) {
+      return Err({ InvalidPayload: "Invalid maintenance data" });
     }
-  ),
 
-  // Get Maintenance Records
-  getMaintenances: query([], Result(Vec(Maintenance), Message), () => {
-    const records = maintenanceStorage.values();
-    if (records.length === 0) {
-      return Err({ NotFound: "No maintenance records found" });
-    }
-    return Ok(records);
+    const vehicleOpt = vehicleStorage.get(payload.vehicle_id);
+    if ("None" in vehicleOpt) return Err({ NotFound: "Vehicle not found" });
+
+    const maintenanceId = uuidv4();
+    const maintenance = {
+      id: maintenanceId,
+      ...payload,
+      status: "pending",
+      created_at: ic.time(),
+    };
+    maintenanceStorage.insert(maintenanceId, maintenance);
+    return Ok(maintenance);
   }),
 
   // Request Emergency Assistance
-  requestEmergencyAssistance: update(
-    [EmergencyAssistancePayload],
-    Result(EmergencyAssistance, Message),
-    (payload) => {
-      if (!payload.description || !payload.location) {
-        return Err({ InvalidPayload: "Invalid emergency assistance data" });
-      }
-
-      // Check if the vehicle exists
-      const vehicleOpt = vehicleStorage.values().filter((vehicle) => {
-        return vehicle.id === payload.vehicle_id;
-      });
-
-      if (vehicleOpt.length === 0) {
-        return Err({ NotFound: "Vehicle not found" });
-      }
-
-      const assistanceId = uuidv4();
-      const emergencyAssistance = {
-        id: assistanceId,
-        ...payload,
-        status: "pending",
-        created_at: ic.time(),
-      };
-      emergencyAssistanceStorage.insert(assistanceId, emergencyAssistance);
-      return Ok(emergencyAssistance);
+  requestEmergencyAssistance: update([EmergencyAssistancePayload], Result(EmergencyAssistance, Message), (payload) => {
+    if (!payload.description || !payload.location) {
+      return Err({ InvalidPayload: "Invalid emergency assistance data" });
     }
-  ),
+
+    const vehicleOpt = vehicleStorage.get(payload.vehicle_id);
+    if ("None" in vehicleOpt) return Err({ NotFound: "Vehicle not found" });
+
+    const assistanceId = uuidv4();
+    const emergencyAssistance = {
+      id: assistanceId,
+      ...payload,
+      status: "pending",
+      created_at: ic.time(),
+    };
+    emergencyAssistanceStorage.insert(assistanceId, emergencyAssistance);
+    return Ok(emergencyAssistance);
+  }),
 
   // Get Emergency Assistance Records
-  getEmergencyAssistances: query(
-    [],
-    Result(Vec(EmergencyAssistance), Message),
-    () => {
-      const records = emergencyAssistanceStorage.values();
-      if (records.length === 0) {
-        return Err({ NotFound: "No emergency assistance records found" });
-      }
-      return Ok(records);
-    }
-  ),
+  getEmergencyAssistances: query([], Result(Vec(EmergencyAssistance), Message), () => {
+    const records = emergencyAssistanceStorage.values();
+    if (records.length === 0) return Err({ NotFound: "No emergency assistance records found" });
+    return Ok(records);
+  }),
 
   // Create Route
   createRoute: update([RoutePayload], Result(Route, Message), (payload) => {
     if (!payload.from_location || !payload.to_location) {
       return Err({ InvalidPayload: "Invalid route data" });
     }
+
     const routeId = uuidv4();
     const route = {
       id: routeId,
@@ -539,18 +432,7 @@ export default Canister({
   // Get Routes
   getRoutes: query([], Result(Vec(Route), Message), () => {
     const routes = routeStorage.values();
-    if (routes.length === 0) {
-      return Err({ NotFound: "No routes found" });
-    }
+    if (routes.length === 0) return Err({ NotFound: "No routes found" });
     return Ok(routes);
-  }),
-
-  // Get Route by ID
-  getRouteById: query([text], Result(Route, Message), (routeId) => {
-    const routeOpt = routeStorage.get(routeId);
-    if ("None" in routeOpt) {
-      return Err({ NotFound: "Route not found" });
-    }
-    return Ok(routeOpt.Some);
   }),
 });
